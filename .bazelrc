@@ -1,1 +1,8 @@
 build --incompatible_strict_action_env=true
+
+# Use local strategy to avoid ccache issues
+build --spawn_strategy=local
+
+# Enable Bzlmod by default
+common --enable_bzlmod
+
