@@ -6,7 +6,7 @@ load(
 )
 
 def _verilator_repository(ctx):
-    info = _version_info(ctx.attr.version)
+    info = _version_info(ctx.attr.version, ctx.attr.sha256)
     ctx.download_and_extract(
         url = info.urls,
         sha256 = info.sha256,
@@ -40,10 +40,38 @@ def _verilator_repository(ctx):
         executable = False,
     )
 
+    # Generate toolchain definition for this version
+    ctx.file(
+        "toolchain/BUILD",
+        content = '''load("@rules_verilator//verilator/internal:toolchain.bzl", "TOOLCHAIN_TYPE", "verilator_toolchain_info")
+
+# Toolchain info for this Verilator version
+verilator_toolchain_info(
+    name = "toolchain_info",
+    libs = [
+        "//:libverilator",
+        "//:svdpi",
+    ],
+    verilator = "//:verilator_executable",
+    visibility = ["//visibility:public"],
+)
+
+# Toolchain wrapper
+toolchain(
+    name = "toolchain",
+    toolchain = ":toolchain_info",
+    toolchain_type = TOOLCHAIN_TYPE,
+    visibility = ["//visibility:public"],
+)
+''',
+        executable = False,
+    )
+
 verilator_repository = repository_rule(
     _verilator_repository,
     attrs = {
         "version": attr.string(mandatory = True),
+        "sha256": attr.string(default = ""),
         "_buildfile": attr.label(
             default = Label("@rules_verilator//verilator/internal:verilator.BUILD"),
         ),
@@ -77,10 +105,37 @@ def rules_verilator_dependencies(version = _DEFAULT_VERSION):
         sha256 = "401b3f591f296f6fd2f6656f01afc1f93111e10b81b9a9d291f9c04b3e4a3e8b",
     )
 
-def rules_verilator_toolchains(version = _DEFAULT_VERSION):
+def rules_verilator_toolchains(version = _DEFAULT_VERSION, sha256 = None):
+    """Register Verilator toolchain for the specified version.
+
+    Args:
+        version: Verilator version string (e.g., "4.224", "5.020", "master")
+        sha256: Optional SHA256 hash for verification. If not provided:
+                - For predefined versions (4.224, master), uses known hash
+                - For custom versions, downloads without verification (not recommended for production)
+
+    Example:
+        # Use predefined version with known SHA256
+        rules_verilator_toolchains()  # Uses default 4.224
+
+        # Use custom version with SHA256 verification
+        rules_verilator_toolchains(
+            version = "5.020",
+            sha256 = "abc123...",
+        )
+
+        # Use custom version without verification (not recommended)
+        rules_verilator_toolchains(version = "5.020")
+    """
     repo_name = "verilator_v{version}".format(version = version)
-    _maybe(verilator_repository, name = repo_name, version = version)
-    native.register_toolchains("@rules_verilator//verilator/toolchains:v{}".format(version))
+    _maybe(
+        verilator_repository,
+        name = repo_name,
+        version = version,
+        sha256 = sha256 if sha256 != None else "",
+    )
+    # Register the toolchain from the verilator repository itself
+    native.register_toolchains("@{repo}//toolchain:toolchain".format(repo = repo_name))
 
 def _maybe(repo_rule, **kwargs):
     if kwargs["name"] not in native.existing_rules():
